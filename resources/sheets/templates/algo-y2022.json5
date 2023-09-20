@@ -1,0 +1,12 @@
+{
+  index_columns: 7,
+  header_rows: 2,
+  footer: {
+    condition: 'len($) == 0'
+  },
+  week_delta: 1,
+  group_sheet_mapping: {
+    M3232: 'M3232-33',
+    M3233: 'M3232-33'
+  }
+}

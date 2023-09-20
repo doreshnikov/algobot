@@ -1,0 +1,8 @@
+{
+  index_columns: 7,
+  header_rows: 2,
+  footer: {
+    condition: 'len($) == 0'
+  },
+  week_delta: 1
+}

@@ -34,7 +34,6 @@
             type: 'object',
             properties: {
               course: {type: 'string'},
-              year: {type: 'string'},
               groups: {
                 type: 'array',
                 items: {type: 'string'},
@@ -52,7 +51,6 @@
               }
             },
             required: [
-              'year',
               'course',
               'groups',
               'sheet_id',
