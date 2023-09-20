@@ -68,7 +68,7 @@ async def register_command_handler(message: Message, state: FSMContext):
 @register_router.entry_point(command='forget')
 async def forget_command_handler(message: Message, state: FSMContext):
     tg_id = message.from_user.id
-    if Users.get_user(tg_id) is None:
+    if not Users.get_user(tg_id):
         await message.reply(
             f'You are not registered yet... Use /{COMMANDS.REGISTER} to introduce yourself.'
         )
