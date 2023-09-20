@@ -1,22 +1,24 @@
+import sys
+import json5
+import asyncio
 import logging
 
-from algobot.db.registry import SheetsRegistry
-from algobot.db.mapping import Mapping
+from aiogram import Bot, Dispatcher
 
-from algobot.telegram.bot import AlgoBot
+from algobot.bot import dispatcher
 
-handler = logging.StreamHandler()
-formatter = logging.Formatter('%(asctime)s - %(name)s - [%(levelname)s]   %(message)s')
-handler.setFormatter(formatter)
-logging.getLogger().setLevel(logging.DEBUG)
-logging.getLogger().addHandler(handler)
-
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
-logger.info('Creating driver...')
-driver = SheetsRegistry()
-logger.info('Connecting mapping...')
-mapping = Mapping()
 
-logger.info('Starting bot...')
-algobot = AlgoBot(driver, mapping)
-algobot.run()
+
+async def main():
+    with open('config/config.json5') as config_stream:
+        config = json5.load(config_stream)
+    token = config['telegram']['token']
+
+    bot = Bot(token, parse_mode='HTML')
+    await dispatcher.start_polling(bot)
+
+
+if __name__ == '__main__':
+    asyncio.run(main())

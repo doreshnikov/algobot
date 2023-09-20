@@ -1,8 +1,0 @@
-sheets:
-  credentials_file: "resources/credentials.json"
-  sheet_id: "<sheet-id>"
-telegram:
-  token: "<tg-bot-token>"
-  admin_id: <your-id>
-local:
-  user_db_file: 'resources/user.db'

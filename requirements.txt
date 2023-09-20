@@ -1,5 +1,8 @@
 pyyaml~=6.0
-setuptools~=60.9.3
-pyTelegramBotAPI~=4.4.0
+setuptools~=68.2.2
+pyTelegramBotAPI~=4.13.0
 peewee~=3.14.9
-gspread~=5.2.0
+aiopeewee~=0.4.2
+gspread~=5.11.2
+aiogram~=3.0.0b8
+json5~=0.9.11

@@ -1,3 +1,11 @@
+# PyCharm configurations
+.idea/
+
+# Private files
+config.json5
+credentials.json
+users.db*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
