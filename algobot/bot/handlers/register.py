@@ -15,7 +15,7 @@ class COMMANDS:
     FORGET_ME = 'forget'
 
 
-register_router = EnablerRouter('register', enabled_by_default=True)
+register_router = EnablerRouter(COMMANDS.REGISTER, enabled_by_default=True)
 
 
 class RegisterState(StatesGroup):
@@ -65,6 +65,20 @@ async def register_command_handler(message: Message, state: FSMContext):
     await message.reply('Select your group', reply_markup=group_selector(groups))
 
 
+@register_router.entry_point(command='forget')
+async def forget_command_handler(message: Message, state: FSMContext):
+    tg_id = message.from_user.id
+    if Users.get_user(tg_id) is None:
+        await message.reply(
+            f'You are not registered yet... Use /{COMMANDS.REGISTER} to introduce yourself.'
+        )
+        return
+
+    await state.clear()
+    Users.delete_user(tg_id)
+    await message.reply('Your registration is revoked')
+
+
 @register_router.callback_query(RegisterState.Group, GroupCallback.filter())
 async def select_group_handler(query: CallbackQuery, state: FSMContext):
     original_message: Message = (await state.get_data())['message']
@@ -105,4 +119,4 @@ async def input_name_handler(message: Message, state: FSMContext):
 
     await state.set_state(RegisterState.Command)
     Users.insert_user(tg_id, tg_username, tg_name, group_id, student_name)
-    await message.reply(f'Ok, registered as {student_name}')
+    await message.reply(f'Ok, registered as `{student_name}`', parse_mode='Markdown')

@@ -1,21 +1,22 @@
-from typing import Callable, Any, Awaitable
+from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware
-from aiogram.dispatcher.flags import get_flag
-from aiogram.types import Message
+from aiogram.types import Update
 
-from algobot.data.users.users import User
+from algobot.data.db.users import Users
+from algobot.data.helpers.text_views import full_name
 
 
 class TelegramUpdaterMiddleware(BaseMiddleware):
     async def __call__(
         self,
-        handler: Callable[[Message, dict[str, Any]], Awaitable[Any]],
-        event: Message,
+        handler: Callable[[Update, dict[str, Any]], Awaitable[Any]],
+        event: Update,
         data: dict[str, Any],
     ):
-        is_feature = get_flag(data, 'feature')
-        is_enabled = get_flag(data, 'enabled')
-        if is_feature and not is_enabled:
-            return await event.reply('This feature is disabled')
-        return await handler(event, data)
+        full_data = event.model_dump()[event.event_type]
+        user = full_data['from_user']
+        tg_id, tg_username = user['id'], user['username']
+        tg_name = full_name(user['first_name'], user['last_name'])
+        Users.update_tg_data(tg_id, tg_username, tg_name)
+        await handler(event, data)
