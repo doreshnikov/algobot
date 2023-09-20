@@ -1,12 +1,16 @@
 {
   index_columns: 7,
+  name_column: 1,
   header_rows: 2,
-  footer: {
+  week_row: 1,
+  tasks_row: 2,
+  footer_rows: {
     condition: 'len($) == 0'
   },
   week_delta: 1,
   group_sheet_mapping: {
     M3232: 'M3232-33',
     M3233: 'M3232-33'
-  }
+  },
+  group_column: 'Группа'
 }

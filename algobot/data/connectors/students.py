@@ -1,4 +1,5 @@
-from algobot.drivers.sqlite.models import Student
+from algobot.drivers.sqlite import database
+from algobot.drivers.sqlite.models import Student, User
 
 
 class Students:
@@ -21,6 +22,14 @@ class Students:
             .dicts()
         )
         return [row['student_name'] for row in rows]
+
+    @staticmethod
+    def delete_group_students(group_id: str):
+        with database.atomic():
+            students = Student.select(Student.id_).where(Student.group_id == group_id)
+            # TODO notify admin?
+            User.delete().where(User.student_ref.in_(students)).execute()
+            Student.delete().where(Student.group_id == group_id).execute()
 
     @staticmethod
     def get_student_by_name(group_id: str, student_name: str) -> dict | None:

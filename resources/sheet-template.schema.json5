@@ -1,9 +1,12 @@
 {
   type: 'object',
   properties: {
-    'index_columns': {type: 'integer'},
-    'header_rows': {type: 'integer'},
-    'footer': {
+    index_columns: {type: 'integer'},
+    name_column: {type: 'integer'},
+    header_rows: {type: 'integer'},
+    week_row: {type: 'integer'},
+    tasks_row: {type: 'integer'},
+    footer_rows: {
       anyOf: [
         {type: 'integer'},
         {
@@ -16,12 +19,16 @@
       ]
     },
     week_delta: {type: 'integer'},
-    group_sheet_mapping: {type: 'object'}
+    group_sheet_mapping: {type: 'object'},
+    group_column: {type: 'string'}
   },
   required: [
     'index_columns',
+    'name_column',
     'header_rows',
-    'footer',
+    'week_row',
+    'tasks_row',
+    'footer_rows',
     'week_delta'
   ]
 }
