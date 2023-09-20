@@ -1,0 +1,22 @@
+{
+  local: {
+    sqlite_source: 'resources/users.db',
+    debug_mode: true
+  },
+  telegram: {
+    token: '...', // your telegram bot token
+    admin_id: 0, // your telegram id
+    teacher_ids: []
+  },
+  sheets: {
+    credentials_file: 'config/credentials.json', // google api creds
+    courses: [
+      {
+        course: 'algo',
+        groups: ['M3232', 'M3233'],
+        sheet_id: '...', // spreadsheet id (after /spreadsheets/d/ in url)
+        template: 'algo-y2022'
+      }
+    ]
+  }
+}
