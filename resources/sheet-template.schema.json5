@@ -20,7 +20,19 @@
     },
     week_delta: {type: 'integer'},
     group_sheet_mapping: {type: 'object'},
-    group_column: {type: 'string'}
+    group_column: {type: 'string'},
+    markers: {
+      type: 'object',
+      properties: {
+        none: {type: 'string'},
+        solved: {type: 'string'},
+        chosen: {type: 'string'},
+        full: {type: 'string'},
+        half: {type: 'string'},
+        think: {type: 'string'},
+        fail: {type: 'string'}
+      }
+    }
   },
   required: [
     'index_columns',

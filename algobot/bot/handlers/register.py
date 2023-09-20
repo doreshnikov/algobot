@@ -1,3 +1,5 @@
+from enum import Enum
+
 from aiogram.filters.callback_data import CallbackData
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
@@ -10,12 +12,12 @@ from algobot.data.connectors.users import Users
 from algobot.data.helpers.text_views import user_reference, full_student_info
 
 
-class COMMANDS:
+class CommandNames(Enum):
     REGISTER = 'register'
     FORGET_ME = 'forget'
 
 
-register_router = EnablerRouter(COMMANDS.REGISTER, enabled_by_default=True)
+register_router = EnablerRouter(CommandNames.REGISTER.value, enabled_by_default=True)
 
 
 class RegisterState(StatesGroup):
@@ -45,7 +47,7 @@ async def register_command_handler(message: Message, state: FSMContext):
         full_student_name = full_student_info(user['student_name'], user['group_id'])
         await message.reply(
             f'You are already registered as `{full_student_name}`.\n'
-            f'Use /{COMMANDS.FORGET_ME} to reset.',
+            f'Use /{CommandNames.FORGET_ME.value} to reset.',
             parse_mode='Markdown',
         )
         return
@@ -70,7 +72,7 @@ async def forget_command_handler(message: Message, state: FSMContext):
     tg_id = message.from_user.id
     if not Users.get_user(tg_id):
         await message.reply(
-            f'You are not registered yet... Use /{COMMANDS.REGISTER} to introduce yourself.'
+            f'You are not registered yet... Use /{CommandNames.REGISTER.value} to introduce yourself.'
         )
         return
 

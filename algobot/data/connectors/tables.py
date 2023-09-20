@@ -1,7 +1,11 @@
+import json5
+
+from enum import Enum, EnumType
 from dataclasses import dataclass, field
 from pathlib import Path
-
-import json5
+from cachetools.func import ttl_cache
+from gspread.utils import Dimension
+from gspread.cell import Cell
 
 from algobot.config import sheets_config
 from algobot.drivers.google import sheets_driver
@@ -39,14 +43,35 @@ class InconsistentMappingError(Exception):
         )
 
 
+class DefaultCellStatus(Enum):
+    NONE = ''
+    SOLVED = '+'
+    CHOSEN = '!'
+    FULL = 'x'
+    HALF = 'y'
+    THINK = '~'
+    FAIL = '-'
+
+
+class MarkingResponse(Enum):
+    OK = 'OK'
+    ALREADY_MARKED = 'already marked'
+    UNAVAILABLE = 'unavailable'
+
+
+class UnmarkingResponse(Enum):
+    OK = 'OK'
+    UNAVAILABLE = 'unavailable'
+
+
 @dataclass
 class Mapping:
     students: list[tuple[str, str]] = field(default_factory=list)
     weeks: list[str] = field(default_factory=list)
     weeks_tasks: dict[str, list[str]] = field(default_factory=dict)
 
-    def student_row(self, group_id: str, student_name: str) -> int:
-        return self.students.index((group_id, student_name))
+    def student_row(self, group: str, student_name: str) -> int:
+        return self.students.index((group, student_name))
 
     def week_number(self, week: str) -> int:
         return self.weeks.index(week)
@@ -54,7 +79,18 @@ class Mapping:
     def task_number(self, week: str, task: str) -> int:
         return self.weeks_tasks[week].index(task)
 
+    def task_column(self, week: str, task: str) -> int:
+        task_column = 0
+        for other_week in self.weeks:
+            if other_week != week:
+                task_column += len(self.weeks_tasks[other_week]) + 1
+            else:
+                task_column += self.task_number(week, task)
+                break
+        return task_column
 
+
+# noinspection PyUnresolvedReferences
 class Table:
     def __init__(self, course: str, **kwargs):
         if len(kwargs) != 1 or ('group_id' not in kwargs and 'group_ids' not in kwargs):
@@ -100,8 +136,16 @@ class Table:
                 raise InconsistentMappingError(self.group_ids, group_names)
             self.group_name = group_names.pop()
         self.table = self.spreadsheet.worksheet(self.group_name)
+        self.markers = self._create_markers()
         self.mapping = None
-        self.reload()
+        self.reload(update_db=False)
+
+    def _create_markers(self) -> EnumType:
+        markers = {item.name: item.value for item in DefaultCellStatus}
+        if 'markers' in self.template:
+            for name, value in self.template['markers'].items():
+                markers[name.upper()] = value
+        return Enum('CellStatus', markers)
 
     @staticmethod
     def a1r1_notation(row: int, column: int):
@@ -139,11 +183,12 @@ class Table:
     def week_delta(self) -> int:
         return self.template['week_delta']
 
-    def _task_column(self, week: str, task: str) -> int:
-        week_number = self.mapping.weeks
+    @ttl_cache(maxsize=10, ttl=5)
+    def get_table_values(self, *args, **kwargs):
+        return self.table.get_values(*args, **kwargs)
 
     def _reload_header(self):
-        header: list[list] = self.table.get_values(
+        header: list[list] = self.get_table_values(
             f'{Table.a1r1_notation(1, 1)}:'
             f'{Table.a1r1_notation(self.header_rows, self.table.col_count)}'
         )
@@ -161,7 +206,7 @@ class Table:
         self.mapping.weeks_tasks[week_name] = tasks[: -self.week_delta]
 
     def _reload_index(self):
-        index = self.table.get_values(
+        index = self.get_table_values(
             f'{Table.a1r1_notation(1, 1)}:'
             f'{Table.a1r1_notation(self.table.row_count, self.index_columns)}'
         )
@@ -194,8 +239,42 @@ class Table:
             for group, student_name in self.mapping.students:
                 Students.register_student(group, student_name)
 
+    def _check_marking(self, column_data: list, row: int) -> MarkingResponse:
+        if column_data[row] != self.markers.NONE.value:
+            return MarkingResponse.ALREADY_MARKED
+        ok_markers = [self.markers.CHOSEN, self.markers.FULL, self.markers.HALF]
+        if any([value in ok_markers for value in column_data]):
+            return MarkingResponse.FROZEN
+        return MarkingResponse.OK
+
+    def mark_tasks(self, group: str, student_name: str, tasks: list[tuple[str, str]]):
+        table_data = self.get_table_values(
+            f'{Table.a1r1_notation(self.header_rows + 1, self.index_columns + 1)}:'
+            f'{Table.a1r1_notation(self.header_rows + len(self.mapping.students), self.table.col_count)}',
+            major_dimension=Dimension.cols,
+        )
+        student_row = self.mapping.student_row(group, student_name)
+        statuses = {status: [] for status in MarkingResponse}
+        for week, task in tasks:
+            task_column = self.mapping.task_column(week, task)
+            statuses[self._check_marking(table_data[task_column], student_row)].append(
+                (week, task, task_column)
+            )
+
+        self.table.update_cells(
+            [
+                Cell(
+                    self.header_rows + student_row + 1,
+                    self.index_columns + task[2] + 1,
+                    self.markers.SOLVED.value,
+                )
+                for task in statuses[MarkingResponse.OK]
+            ]
+        )
+        return statuses
+
 
 if __name__ == '__main__':
     table = Table('dm', group_id='M3238')
     table.reload()
-    print(table.mapping)
+    table.mark_tasks('M3238', 'Бондарев Федор Алексеевич', [('Неделя 2', '31')])

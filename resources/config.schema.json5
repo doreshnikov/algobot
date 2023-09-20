@@ -39,6 +39,7 @@
                 items: {type: 'string'},
                 minItems: 1
               },
+              merged_groups: {type: 'boolean'},
               sheet_id: {type: 'string'},
               template: {type: 'string'},
               import: {

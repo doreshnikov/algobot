@@ -6,3 +6,4 @@ gspread~=5.11.2
 aiogram~=3.0.0b8
 json5~=0.9.11
 emoji~2.8.0
+cachetools~=5.3.1
