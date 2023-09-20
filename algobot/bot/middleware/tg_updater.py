@@ -3,7 +3,7 @@ from typing import Any, Awaitable, Callable
 from aiogram import BaseMiddleware
 from aiogram.types import Update
 
-from algobot.data.db.users import Users
+from algobot.data.connectors.users import Users
 from algobot.data.helpers.text_views import full_name
 
 
