@@ -9,15 +9,15 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from .feature import EnablerRouter
 from algobot.data.connectors.students import Students
 from algobot.data.connectors.users import Users
-from algobot.data.helpers.text_views import user_reference, full_student_info
+from algobot.data.helpers.formatters import user_reference, full_student_info
 
 
-class CommandNames(Enum):
+class CommandName(Enum):
     REGISTER = 'register'
     FORGET_ME = 'forget'
 
 
-register_router = EnablerRouter(CommandNames.REGISTER.value, enabled_by_default=True)
+register_router = EnablerRouter(CommandName.REGISTER.value, enabled_by_default=True)
 
 
 class RegisterState(StatesGroup):
@@ -47,7 +47,7 @@ async def register_command_handler(message: Message, state: FSMContext):
         full_student_name = full_student_info(user['student_name'], user['group_id'])
         await message.reply(
             f'You are already registered as `{full_student_name}`.\n'
-            f'Use /{CommandNames.FORGET_ME.value} to reset.',
+            f'Use /{CommandName.FORGET_ME.value} to reset.',
             parse_mode='Markdown',
         )
         return
@@ -72,7 +72,7 @@ async def forget_command_handler(message: Message, state: FSMContext):
     tg_id = message.from_user.id
     if not Users.get_user(tg_id):
         await message.reply(
-            f'You are not registered yet... Use /{CommandNames.REGISTER.value} to introduce yourself.'
+            f'You are not registered yet... Use /{CommandName.REGISTER.value} to introduce yourself.'
         )
         return
 
@@ -88,7 +88,7 @@ async def select_group_handler(query: CallbackQuery, state: FSMContext):
     await state.update_data({'group_id': group_id})
     await query.answer(f'Selected group {group_id}')
     await state.set_state(RegisterState.Name)
-    await original_message.answer(
+    await original_message.reply(
         'Please write your name (exactly as in corresponding table)'
     )
 
@@ -119,6 +119,6 @@ async def input_name_handler(message: Message, state: FSMContext):
         )
         return
 
-    await state.set_state(RegisterState.Command)
+    await state.clear()
     Users.insert_user(tg_id, tg_username, tg_name, group_id, student_name)
     await message.reply(f'Ok, registered as `{student_name}`', parse_mode='Markdown')

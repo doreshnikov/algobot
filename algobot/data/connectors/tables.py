@@ -1,5 +1,6 @@
 import json5
 
+from typing import Callable
 from enum import Enum, EnumType
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -53,14 +54,9 @@ class DefaultCellStatus(Enum):
     FAIL = '-'
 
 
-class MarkingResponse(Enum):
+class MarkingResult(Enum):
     OK = 'OK'
-    ALREADY_MARKED = 'already marked'
-    UNAVAILABLE = 'unavailable'
-
-
-class UnmarkingResponse(Enum):
-    OK = 'OK'
+    NO_CHANGES = 'no changes'
     UNAVAILABLE = 'unavailable'
 
 
@@ -90,17 +86,26 @@ class Mapping:
         return task_column
 
 
-# noinspection PyUnresolvedReferences
 class Table:
-    def __init__(self, course: str, **kwargs):
+    _instances = dict()
+
+    @staticmethod
+    def get_table(course: str, **kwargs) -> 'Table':
         if len(kwargs) != 1 or ('group_id' not in kwargs and 'group_ids' not in kwargs):
             raise ValueError(
                 'Expected either `group_id: str` or `group_ids: list[str]`'
             )
-        self.group_ids = kwargs.get('group_ids', [kwargs['group_id']])
-        if len(self.group_ids) == 0:
+        group_ids = kwargs.get('group_ids', [kwargs.get('group_id')])
+        if len(group_ids) == 0:
             raise ValueError('Expected at least one group per table')
 
+        key = (course, tuple(sorted(group_ids)))
+        if key not in Table._instances:
+            Table._instances[key] = Table(course, group_ids)
+        return Table._instances[key]
+
+    def __init__(self, course: str, group_ids: list[str]):
+        self.group_ids = group_ids
         self.course = course
         self.config = None
         for course_config in sheets_config['courses']:
@@ -121,7 +126,7 @@ class Table:
         template_path = templates_dir / f'{template_name}.json5'
         if not template_path.is_file():
             raise UnknownTemplateError(template_name)
-        with open(template_path) as template_file:
+        with open(template_path, encoding='utf-8') as template_file:
             self.template = json5.load(template_file)
 
         self.group_name = self.group_ids[0]
@@ -183,9 +188,16 @@ class Table:
     def week_delta(self) -> int:
         return self.template['week_delta']
 
-    @ttl_cache(maxsize=10, ttl=5)
+    @ttl_cache(maxsize=10, ttl=2)
     def get_table_values(self, *args, **kwargs):
         return self.table.get_values(*args, **kwargs)
+
+    def get_table_data(self, major_dimension: Dimension) -> list[list]:
+        return self.get_table_values(
+            f'{Table.a1r1_notation(self.header_rows + 1, self.index_columns + 1)}:'
+            f'{Table.a1r1_notation(self.header_rows + len(self.mapping.students), self.table.col_count)}',
+            major_dimension=major_dimension,
+        )
 
     def _reload_header(self):
         header: list[list] = self.get_table_values(
@@ -239,42 +251,122 @@ class Table:
             for group, student_name in self.mapping.students:
                 Students.register_student(group, student_name)
 
-    def _check_marking(self, column_data: list, row: int) -> MarkingResponse:
-        if column_data[row] != self.markers.NONE.value:
-            return MarkingResponse.ALREADY_MARKED
-        ok_markers = [self.markers.CHOSEN, self.markers.FULL, self.markers.HALF]
-        if any([value in ok_markers for value in column_data]):
-            return MarkingResponse.FROZEN
-        return MarkingResponse.OK
+    # noinspection PyUnresolvedReferences
+    def _check_marking(self, column_data: list, row: int) -> MarkingResult:
+        if (
+            column_data[row] != self.markers.NONE.value
+            and column_data[row] != self.markers.FAIL.value
+        ):
+            return MarkingResult.NO_CHANGES
+        locking_markers = [self.markers.CHOSEN, self.markers.FULL, self.markers.HALF]
+        locking_markers = [marker.value for marker in locking_markers]
+        if any([value in locking_markers for value in column_data]):
+            return MarkingResult.UNAVAILABLE
+        return MarkingResult.OK
 
-    def mark_tasks(self, group: str, student_name: str, tasks: list[tuple[str, str]]):
-        table_data = self.get_table_values(
-            f'{Table.a1r1_notation(self.header_rows + 1, self.index_columns + 1)}:'
-            f'{Table.a1r1_notation(self.header_rows + len(self.mapping.students), self.table.col_count)}',
-            major_dimension=Dimension.cols,
-        )
+    # noinspection PyUnresolvedReferences
+    def _check_unmarking(self, column_data: list, row: int) -> MarkingResult:
+        if column_data[row] == self.markers.NONE.value:
+            return MarkingResult.NO_CHANGES
+        locking_markers = [
+            self.markers.CHOSEN,
+            self.markers.FULL,
+            self.markers.HALF,
+            self.markers.FAIL,
+        ]
+        locking_markers = [marker.value for marker in locking_markers]
+        if column_data[row] in locking_markers:
+            return MarkingResult.UNAVAILABLE
+        return MarkingResult.OK
+
+    def _update_tasks(
+        self,
+        group: str,
+        student_name: str,
+        tasks: list[tuple[str, str]],
+        target_status: Enum,
+        checker: Callable[[list, int], MarkingResult],
+    ):
+        table_data = self.get_table_data(major_dimension=Dimension.cols)
         student_row = self.mapping.student_row(group, student_name)
-        statuses = {status: [] for status in MarkingResponse}
+        statuses = {status: [] for status in MarkingResult}
         for week, task in tasks:
             task_column = self.mapping.task_column(week, task)
-            statuses[self._check_marking(table_data[task_column], student_row)].append(
+            statuses[checker(table_data[task_column], student_row)].append(
                 (week, task, task_column)
             )
 
-        self.table.update_cells(
-            [
-                Cell(
-                    self.header_rows + student_row + 1,
-                    self.index_columns + task[2] + 1,
-                    self.markers.SOLVED.value,
-                )
-                for task in statuses[MarkingResponse.OK]
-            ]
-        )
+        cells = [
+            Cell(
+                self.header_rows + student_row + 1,
+                self.index_columns + task[2] + 1,
+                target_status.value,
+            )
+            for task in statuses[MarkingResult.OK]
+        ]
+        if len(cells) > 0:
+            self.table.update_cells(cells)
         return statuses
+
+    # noinspection PyUnresolvedReferences
+    def mark_tasks(self, group: str, student_name: str, tasks: list[tuple[str, str]]):
+        return self._update_tasks(
+            group, student_name, tasks, self.markers.SOLVED, self._check_marking
+        )
+
+    # noinspection PyUnresolvedReferences
+    def unmark_tasks(self, group: str, student_name: str, tasks: list[tuple[str, str]]):
+        return self._update_tasks(
+            group, student_name, tasks, self.markers.NONE, self._check_unmarking
+        )
+
+    def list_weeks(self) -> list[str]:
+        return self.mapping.weeks
+
+    def _list_filtered_week_tasks(
+        self,
+        group: str,
+        student_name: str,
+        week: str,
+        condition: Callable[[list, int], MarkingResult],
+    ) -> list[str]:
+        if week not in self.mapping.weeks_tasks:
+            return []
+        table_data = self.get_table_data(major_dimension=Dimension.cols)
+        student_row = self.mapping.student_row(group, student_name)
+        return [
+            task
+            for task in self.mapping.weeks_tasks[week]
+            if condition(table_data[self.mapping.task_column(week, task)], student_row)
+               == MarkingResult.OK
+        ]
+
+    def list_available_week_tasks(
+        self, group: str, student_name: str, week: str
+    ) -> list[str]:
+        return self._list_filtered_week_tasks(
+            group, student_name, week, self._check_marking
+        )
+
+    def list_recallable_week_tasks(
+        self, group: str, student_name: str, week: str
+    ) -> list[str]:
+        return self._list_filtered_week_tasks(
+            group, student_name, week, self._check_unmarking
+        )
+
+
+def populate_registry():
+    for course_config in sheets_config['courses']:
+        course = course_config['course']
+        groups = course_config['groups']
+        print(course, groups, flush=True)
+        if course_config.get('merged_groups', False):
+            Table.get_table(course, group_ids=groups).reload()
+        else:
+            for group in groups:
+                Table.get_table(course, group_id=group).reload()
 
 
 if __name__ == '__main__':
-    table = Table('dm', group_id='M3238')
-    table.reload()
-    table.mark_tasks('M3238', 'Бондарев Федор Алексеевич', [('Неделя 2', '31')])
+    populate_registry()

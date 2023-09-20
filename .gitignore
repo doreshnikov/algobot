@@ -5,6 +5,7 @@
 config.json5
 credentials.json
 users.db*
+TODO
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

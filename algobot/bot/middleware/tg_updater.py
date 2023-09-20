@@ -4,7 +4,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import Update
 
 from algobot.data.connectors.users import Users
-from algobot.data.helpers.text_views import full_name
+from algobot.data.helpers.formatters import full_name
 
 
 class TelegramUpdaterMiddleware(BaseMiddleware):

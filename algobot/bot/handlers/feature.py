@@ -58,10 +58,15 @@ class EnablerRouter(Router, metaclass=DictPropagator, field_name='_features'):
                 handler,
                 Command(command_name),
                 *filters,
-                flags={'feature': True, 'enabled': self.enabled_by_default},
+                flags={'feature': True, 'enabled': self.enabled_by_default, 'chat_action': {
+                    'action': 'typing',
+                    'initial_sleep': 0,
+                    'interval': 0.5
+                }},
                 **kwargs,
             )
             self.entry_points.append(self.message.handlers[-1])
+            return handler
 
         return decorator
 
