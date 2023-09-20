@@ -5,8 +5,8 @@ from aiogram.types import Message, InlineKeyboardMarkup, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from .feature import EnablerRouter
-from algobot.data.users.students import Students
-from algobot.data.users.users import Users
+from algobot.data.db.students import Students
+from algobot.data.db.users import Users
 from algobot.data.helpers.text_views import user_reference, full_student_info
 
 

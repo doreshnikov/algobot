@@ -1,19 +1,4 @@
-from peewee import Model, AutoField, CharField
-
-from algobot.drivers.sqlite import database
-
-
-class Student(Model):
-    id_ = AutoField(primary_key=True)
-    group_id = CharField()
-    student_name = CharField()
-
-    class Meta:
-        database = database
-        indexes = ((('group_id', 'student_name'), True),)
-
-
-Student.create_table(safe=True)
+from algobot.drivers.sqlite.models import Student
 
 
 class Students:

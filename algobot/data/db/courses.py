@@ -1,18 +1,4 @@
-from peewee import Model, AutoField, CharField, ForeignKeyField
-
-from .. import database
-
-
-class Course(Model):
-    id_ = AutoField(primary_key=True)
-    course = CharField()
-    group_id = CharField()
-
-    class Meta:
-        database = database
-
-
-Course.create_table(safe=True)
+from algobot.drivers.sqlite.models import Student, Transfer
 
 
 class Transfers:

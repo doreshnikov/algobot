@@ -1,22 +1,5 @@
-from peewee import Model, IntegerField, CharField, ForeignKeyField
-
 from algobot.drivers.sqlite import database
-from .students import Student
-
-
-class User(Model):
-    tg_id = IntegerField(primary_key=True)
-    tg_username = CharField(unique=True, null=True)
-    tg_name = CharField()
-    student_ref = ForeignKeyField(Student)
-    selected_course = CharField(null=True)
-
-    class Meta:
-        database = database
-        table_name = 'user'
-
-
-User.create_table(safe=True)
+from algobot.drivers.sqlite.models import Student, User
 
 
 class Users:
