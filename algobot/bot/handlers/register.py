@@ -10,6 +10,7 @@ from .feature import EnablerRouter
 from algobot.data.connectors.students import Students
 from algobot.data.connectors.users import Users
 from algobot.data.helpers.formatters import user_reference, full_student_info
+from algobot.utils.keyborad_sqrt import reshape
 
 
 class CommandName(Enum):
@@ -34,6 +35,7 @@ def group_selector(groups: list[str]) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for group_id in groups:
         builder.button(text=group_id, callback_data=GroupCallback(group_id=group_id))
+    reshape(builder, len(groups))
     return builder.as_markup()
 
 

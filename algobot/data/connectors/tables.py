@@ -238,6 +238,7 @@ class Table:
             if footer_condition(row):
                 break
             student_name = index[row][self.name_column]
+
             group = index[row][group_column] if group_column else self.group_ids[0]
             self.mapping.students.append((group, student_name))
 
@@ -338,7 +339,7 @@ class Table:
             task
             for task in self.mapping.weeks_tasks[week]
             if condition(table_data[self.mapping.task_column(week, task)], student_row)
-               == MarkingResult.OK
+            == MarkingResult.OK
         ]
 
     def list_available_week_tasks(
@@ -356,17 +357,21 @@ class Table:
         )
 
 
-def populate_registry():
+def populate_registry(locators: list[tuple[str, list[str] | str]]):
     for course_config in sheets_config['courses']:
         course = course_config['course']
         groups = course_config['groups']
         print(course, groups, flush=True)
-        if course_config.get('merged_groups', False):
+        if course_config.get('merged_groups', False) and (course, groups) in locators:
             Table.get_table(course, group_ids=groups).reload()
         else:
             for group in groups:
-                Table.get_table(course, group_id=group).reload()
+                if (course, group) in locators:
+                    Table.get_table(course, group_id=group).reload()
 
 
 if __name__ == '__main__':
-    populate_registry()
+    populate_registry([('algo', 'M3141')])
+    populate_registry([('algo', 'M3142')])
+    populate_registry([('algo', 'M3238')])
+    populate_registry([('algo', 'M3239')])

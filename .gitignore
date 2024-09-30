@@ -2,7 +2,8 @@
 .idea/
 
 # Private files
-config.json5
+config/
+!config/config.public.json5
 credentials.json
 users.db*
 TODO

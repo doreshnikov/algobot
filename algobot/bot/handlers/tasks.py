@@ -17,6 +17,7 @@ from .feature import EnablerRouter
 from .register import CommandName as RegisterCommandNames
 from ...data.connectors.tables import MarkingResult, Table
 from ...data.helpers.defaults import get_default_course
+from ...utils.keyborad_sqrt import reshape
 
 tasks_router = EnablerRouter('tasks', enabled_by_default=True)
 
@@ -39,9 +40,9 @@ class CommitCallback(CallbackData, prefix='commit'):
 
 
 class TasksState(StatesGroup):
-    Command = State()
-    Week = State()
-    Task = State()
+    COMMAND = State()
+    WEEK = State()
+    TASK = State()
 
 
 def week_selector(weeks: list[str]) -> InlineKeyboardMarkup:
@@ -52,24 +53,21 @@ def week_selector(weeks: list[str]) -> InlineKeyboardMarkup:
 
 
 def task_selector(
-    week_name: str, tasks: list[str], selection: set[str]
+    tasks: list[str], selection: set[str], action: CommandName
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    symbol = ':green_circle:' if action is CommandName.DECLARE else ':red_circle:'
     for task_name in tasks:
         builder.button(
             text=task_name
             if task_name not in selection
-            else f'{task_name}{emoji.emojize(":green_circle:")}',
+            else f'{emoji.emojize(symbol)}{task_name}',
             callback_data=TaskCallback(task_name=task_name),
         )
-    rows = int(len(tasks) ** 0.5)
+    reshape(builder, len(tasks))
     builder.row(
         InlineKeyboardButton(text='Commit', callback_data=CommitCallback().pack())
     )
-    item_count = [len(tasks) // rows for _ in range(rows)]
-    if (remainder := len(tasks) % rows) != 0:
-        item_count.append(remainder)
-    builder.adjust(*item_count)
     return builder.as_markup()
 
 
@@ -91,9 +89,12 @@ async def process_entry_point(
     await state.update_data(
         {'message': message, 'tg_id': tg_id, 'table': table, 'action': command}
     )
-    await state.set_state(TasksState.Week)
+    await state.set_state(TasksState.WEEK)
     weeks = table.list_weeks()
-    await message.reply('Select a week', reply_markup=week_selector(weeks))
+    week_selector_message = await message.reply(
+        'Select a week', reply_markup=week_selector(weeks)
+    )
+    await state.update_data({'week_selector_message': week_selector_message})
 
 
 @tasks_router.entry_point(command=CommandName.DECLARE.value)
@@ -106,8 +107,8 @@ async def recall_command_handler(message: Message, state: FSMContext):
     await process_entry_point(message, state, CommandName.RECALL)
 
 
-@tasks_router.callback_query(TasksState.Week, WeekCallback.filter())
-@tasks_router.callback_query(TasksState.Task, WeekCallback.filter())
+@tasks_router.callback_query(TasksState.WEEK, WeekCallback.filter())
+@tasks_router.callback_query(TasksState.TASK, WeekCallback.filter())
 async def select_week_handler(query: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     group_id, student_name = data['group_id'], data['student_name']
@@ -125,25 +126,27 @@ async def select_week_handler(query: CallbackQuery, state: FSMContext):
         await query.answer('Selected week has no tasks to offer :(')
         return
     await query.answer(f'Selected week {week_name}')
-    await state.set_state(TasksState.Task)
+    await state.set_state(TasksState.TASK)
 
     await state.update_data(
         {'week_name': week_name, 'tasks': tasks, 'selection': set()}
     )
     if 'task_selector_message' in data:
         await data['task_selector_message'].delete()
+
+    expected_status = 'solved' if action is CommandName.DECLARE else 'not solved'
     task_selector_message = await original_message.reply(
-        'Pick tasks to mark as solved and press \'Commit\'',
-        reply_markup=task_selector(week_name, tasks, set()),
+        f'Pick tasks to mark as {expected_status} and press \'Commit\'',
+        reply_markup=task_selector(tasks, set(), action),
     )
     await state.update_data({'task_selector_message': task_selector_message})
 
 
-@tasks_router.callback_query(TasksState.Task, TaskCallback.filter())
+@tasks_router.callback_query(TasksState.TASK, TaskCallback.filter())
 async def check_task_handler(query: CallbackQuery, state: FSMContext):
     data = await state.get_data()
+    action: CommandName = data['action']
     task_name = TaskCallback.unpack(query.data).task_name
-    week_name = data['week_name']
     tasks: list[str] = data['tasks']
     selection: set[str] = data['selection']
 
@@ -155,11 +158,11 @@ async def check_task_handler(query: CallbackQuery, state: FSMContext):
     task_selector_message: Message = data['task_selector_message']
     await state.update_data({'selection': selection})
     await task_selector_message.edit_reply_markup(
-        reply_markup=task_selector(week_name, tasks, selection)
+        reply_markup=task_selector(tasks, selection, action)
     )
 
 
-@tasks_router.callback_query(TasksState.Task, CommitCallback.filter())
+@tasks_router.callback_query(TasksState.TASK, CommitCallback.filter())
 async def commit_handler(query: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     group_id, student_name, week_name = (
@@ -190,6 +193,8 @@ async def commit_handler(query: CallbackQuery, state: FSMContext):
         await original_message.reply(f'You can not {action.value} tasks {tasks_string}')
 
     task_selector_message: Message = data['task_selector_message']
+    week_selector_message: Message = data['week_selector_message']
     await task_selector_message.delete()
+    await week_selector_message.delete()
     await query.answer('Done!')
     await state.clear()

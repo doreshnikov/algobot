@@ -3,10 +3,10 @@ from aiogram.utils.chat_action import ChatActionMiddleware
 
 from .handlers import router
 from .middleware.enabler import EnablerMiddleware
-from .middleware.tg_updater import TelegramUpdaterMiddleware
+from .middleware.user_data import UserDataMiddleware
 
 dispatcher = Dispatcher()
 dispatcher.include_router(router)
 dispatcher.message.middleware.register(EnablerMiddleware())
 dispatcher.message.middleware.register(ChatActionMiddleware())
-dispatcher.update.outer_middleware.register(TelegramUpdaterMiddleware())
+dispatcher.update.outer_middleware.register(UserDataMiddleware())

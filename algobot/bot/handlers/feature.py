@@ -52,17 +52,20 @@ class EnablerRouter(Router, metaclass=DictPropagator, field_name='_features'):
 
     def entry_point(self, *filters: CallbackType, **kwargs):
         command_name = kwargs.pop('command', self.feature_name)
+        flags = {'feature': True, 'enabled': self.enabled_by_default}
+        if kwargs.pop('long', False):
+            flags['chat_action'] = {
+                'action': 'typing',
+                'initial_sleep': 0,
+                'interval': 0.5,
+            }
 
         def decorator(handler: CallbackType):
             self.message.register(
                 handler,
                 Command(command_name),
                 *filters,
-                flags={'feature': True, 'enabled': self.enabled_by_default, 'chat_action': {
-                    'action': 'typing',
-                    'initial_sleep': 0,
-                    'interval': 0.5
-                }},
+                flags=flags,
                 **kwargs,
             )
             self.entry_points.append(self.message.handlers[-1])
