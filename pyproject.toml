@@ -1,3 +1,28 @@
 [tool.black]
 skip-string-normalization = true
 exclude = 'setup\.py'
+
+[tool.poetry]
+name = "algobot"
+version = "0.1.0"
+description = ""
+authors = ["Daniil Oreshnikov <dan.io.oreshnikov@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+PyYAML = "^6.0.2"
+peewee = "^3.17.7"
+gspread = "^6.1.4"
+aiogram = "^3.13.1"
+json5 = "^0.9.25"
+emoji = "^2.14.0"
+cachetools = "^5.5.0"
+aiogram-utils = {git = "https://github.com/doreshnikov/aiogram-utils"}
+
+[tool.poetry.group.dev.dependencies]
+setuptools = "^75.2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

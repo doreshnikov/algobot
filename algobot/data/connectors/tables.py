@@ -1,6 +1,6 @@
 import json5
 
-from typing import Callable
+from typing import Callable, Type
 from enum import Enum, EnumType
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -44,7 +44,7 @@ class InconsistentMappingError(Exception):
         )
 
 
-class DefaultCellStatus(Enum):
+class DefaultCellMarker(Enum):
     NONE = ''
     SOLVED = '+'
     CHOSEN = '!'
@@ -54,10 +54,17 @@ class DefaultCellStatus(Enum):
     FAIL = '-'
 
 
-class MarkingResult(Enum):
+class ChangeMarkingVerdict(Enum):
     OK = 'OK'
     NO_CHANGES = 'no changes'
     UNAVAILABLE = 'unavailable'
+
+
+class MarkStatus(Enum):
+    MARKED = 'marked'
+    EMPTY = 'empty'
+    MARKED_LOCKED = 'marked locked'
+    EMPTY_LOCKED = 'empty locked'
 
 
 @dataclass
@@ -110,7 +117,7 @@ class Table:
         self.config = None
         for course_config in sheets_config['courses']:
             if course_config['course'] == course and all(
-                [group_id in course_config['groups'] for group_id in self.group_ids]
+                    [group_id in course_config['groups'] for group_id in self.group_ids]
             ):
                 if self.config:
                     raise MultipleCoursesError(course, self.group_ids)
@@ -146,7 +153,7 @@ class Table:
         self.reload(update_db=False)
 
     def _create_markers(self) -> EnumType:
-        markers = {item.name: item.value for item in DefaultCellStatus}
+        markers = {item.name: item.value for item in DefaultCellMarker}
         if 'markers' in self.template:
             for name, value in self.template['markers'].items():
                 markers[name.upper()] = value
@@ -252,83 +259,122 @@ class Table:
                 Students.register_student(group, student_name)
 
     # noinspection PyUnresolvedReferences
-    def _check_marking(self, column_data: list, row: int) -> MarkingResult:
-        if (
-            column_data[row] != self.markers.NONE.value
-            and column_data[row] != self.markers.FAIL.value
-        ):
-            return MarkingResult.NO_CHANGES
-        locking_markers = [self.markers.CHOSEN, self.markers.FULL, self.markers.HALF]
-        locking_markers = [marker.value for marker in locking_markers]
-        if any([value in locking_markers for value in column_data]):
-            return MarkingResult.UNAVAILABLE
-        return MarkingResult.OK
+    def _mark_status(self, column_data: list, row: int) -> MarkStatus:
+        marker = column_data[row]
+
+        if marker != self.markers.NONE.value:
+            if marker in (
+                    self.markers.CHOSEN.value,
+                    self.markers.FULL.value,
+                    self.markers.HALF.value,
+                    self.markers.FAIL.value
+            ):
+                return MarkStatus.MARKED_LOCKED
+            return MarkStatus.MARKED
+
+        if marker == self.markers.FAIL.value or marker == self.markers.THINK.value:
+            return MarkStatus.EMPTY
+        if any(value in (
+                self.markers.CHOSEN.value,
+                self.markers.FULL.value,
+                self.markers.HALF.value
+        ) for value in column_data):
+            return MarkStatus.EMPTY_LOCKED
+
+        return MarkStatus.EMPTY
 
     # noinspection PyUnresolvedReferences
-    def _check_unmarking(self, column_data: list, row: int) -> MarkingResult:
-        if column_data[row] == self.markers.NONE.value:
-            return MarkingResult.NO_CHANGES
-        locking_markers = [
-            self.markers.CHOSEN,
-            self.markers.FULL,
-            self.markers.HALF,
-            self.markers.FAIL,
-        ]
-        locking_markers = [marker.value for marker in locking_markers]
-        if column_data[row] in locking_markers:
-            return MarkingResult.UNAVAILABLE
-        return MarkingResult.OK
+    def _check_marking(self, column_data: list, row: int) -> ChangeMarkingVerdict:
+        status = self._mark_status(column_data, row)
+        if status == MarkStatus.EMPTY:
+            return ChangeMarkingVerdict.OK
+        if status == MarkStatus.EMPTY_LOCKED:
+            return ChangeMarkingVerdict.UNAVAILABLE
+        return ChangeMarkingVerdict.NO_CHANGES
+
+    # noinspection PyUnresolvedReferences
+    def _check_unmarking(self, column_data: list, row: int) -> ChangeMarkingVerdict:
+        status = self._mark_status(column_data, row)
+        if status == MarkStatus.MARKED:
+            return ChangeMarkingVerdict.OK
+        if status == MarkStatus.MARKED_LOCKED:
+            return ChangeMarkingVerdict.UNAVAILABLE
+        return ChangeMarkingVerdict.NO_CHANGES
 
     def _update_tasks(
-        self,
-        group: str,
-        student_name: str,
-        tasks: list[tuple[str, str]],
-        target_status: Enum,
-        checker: Callable[[list, int], MarkingResult],
+            self,
+            group: str,
+            student_name: str,
+            tasks: dict[tuple[str, str], DefaultCellMarker],
+            checker: Callable[[list, int], ChangeMarkingVerdict],
     ):
         table_data = self.get_table_data(major_dimension=Dimension.cols)
         student_row = self.mapping.student_row(group, student_name)
-        statuses = {status: [] for status in MarkingResult}
-        for week, task in tasks:
+        statistics = {status: [] for status in ChangeMarkingVerdict}
+
+        for task_ref, new_marker in tasks.items():
+            week, task = task_ref
             task_column = self.mapping.task_column(week, task)
-            statuses[checker(table_data[task_column], student_row)].append(
-                (week, task, task_column)
+            column_data = table_data[task_column]
+            status = (
+                ChangeMarkingVerdict.NO_CHANGES
+                if column_data[student_row] == new_marker.value
+                else checker(column_data, student_row)
             )
+            statistics[status].append((week, task, task_column))
 
         cells = [
             Cell(
                 self.header_rows + student_row + 1,
-                self.index_columns + task[2] + 1,
-                target_status.value,
+                self.index_columns + column + 1,
+                tasks[(week, task)].value,
             )
-            for task in statuses[MarkingResult.OK]
+            for week, task, column in statistics[ChangeMarkingVerdict.OK]
         ]
         if len(cells) > 0:
             self.table.update_cells(cells)
-        return statuses
+        return statistics
 
     # noinspection PyUnresolvedReferences
     def mark_tasks(self, group: str, student_name: str, tasks: list[tuple[str, str]]):
         return self._update_tasks(
-            group, student_name, tasks, self.markers.SOLVED, self._check_marking
+            group, student_name, {
+                task: self.markers.SOLVED
+                for task in tasks
+            }, self._check_marking
         )
 
     # noinspection PyUnresolvedReferences
     def unmark_tasks(self, group: str, student_name: str, tasks: list[tuple[str, str]]):
         return self._update_tasks(
-            group, student_name, tasks, self.markers.NONE, self._check_unmarking
+            group, student_name, {
+                task: self.markers.NONE
+                for task in tasks
+            }, self._check_unmarking
         )
+
+    # noinspection PyUnresolvedReferences
+    def update_tasks(self, group: str, student_name: str, tasks: list[tuple[str, str, bool]]):
+        def _check_task(column_data: list, row: int) -> ChangeMarkingVerdict:
+            status = self._mark_status(column_data, row)
+            if status in (MarkStatus.MARKED_LOCKED, MarkStatus.EMPTY_LOCKED):
+                return ChangeMarkingVerdict.UNAVAILABLE
+            return ChangeMarkingVerdict.OK
+
+        return self._update_tasks(group, student_name, {
+            (week, task): self.markers.SOLVED if mark else self.markers.NONE
+            for week, task, mark in tasks
+        }, _check_task)
 
     def list_weeks(self) -> list[str]:
         return self.mapping.weeks
 
     def _list_filtered_week_tasks(
-        self,
-        group: str,
-        student_name: str,
-        week: str,
-        condition: Callable[[list, int], MarkingResult],
+            self,
+            group: str,
+            student_name: str,
+            week: str,
+            condition: Callable[[list, int], ChangeMarkingVerdict],
     ) -> list[str]:
         if week not in self.mapping.weeks_tasks:
             return []
@@ -338,22 +384,38 @@ class Table:
             task
             for task in self.mapping.weeks_tasks[week]
             if condition(table_data[self.mapping.task_column(week, task)], student_row)
-               == MarkingResult.OK
+               == ChangeMarkingVerdict.OK
         ]
 
     def list_available_week_tasks(
-        self, group: str, student_name: str, week: str
+            self, group: str, student_name: str, week: str
     ) -> list[str]:
         return self._list_filtered_week_tasks(
             group, student_name, week, self._check_marking
         )
 
     def list_recallable_week_tasks(
-        self, group: str, student_name: str, week: str
+            self, group: str, student_name: str, week: str
     ) -> list[str]:
         return self._list_filtered_week_tasks(
             group, student_name, week, self._check_unmarking
         )
+
+    def list_week_tasks(
+            self, group: str, student_name: str, week: str
+    ) -> list[tuple[str, MarkStatus]]:
+        if week not in self.mapping.weeks_tasks:
+            return []
+        table_data = self.get_table_data(major_dimension=Dimension.cols)
+        student_row = self.mapping.student_row(group, student_name)
+
+        tasks = []
+        for task in self.mapping.weeks_tasks[week]:
+            column = self.mapping.task_column(week, task)
+            column_data = table_data[column]
+            tasks.append((task, self._mark_status(column_data, student_row)))
+
+        return tasks
 
 
 def populate_registry():

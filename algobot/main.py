@@ -1,9 +1,9 @@
-import sys
-import json5
 import asyncio
 import logging
+import sys
 
-from aiogram import Bot, Dispatcher
+import json5
+from aiogram import Bot
 
 from algobot.bot import dispatcher
 
@@ -16,7 +16,7 @@ async def main():
         config = json5.load(config_stream)
     token = config['telegram']['token']
 
-    bot = Bot(token, parse_mode='HTML')
+    bot = Bot(token)
     await dispatcher.start_polling(bot)
 
 

@@ -1,195 +1,185 @@
-from enum import Enum
+from dataclasses import dataclass, field
 
 import emoji
+from aiogram import Bot
 from aiogram.filters.callback_data import CallbackData
-from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import (
-    CallbackQuery,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    Message,
-)
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.types import CallbackQuery, Message
 
+from algobot.data.connectors.tables import ChangeMarkingVerdict, Table, MarkStatus
 from algobot.data.connectors.users import Users
+from algobot.data.helpers.defaults import get_default_course
+from tgutils.consts.aliases import KeyboardBuilder, Button
+from tgutils.consts.buttons import FAIL_MINI, OK_MINI, RECORD
+from tgutils.context import Context
+from tgutils.context.internal import ContextTransition
+from tgutils.context.types import Response
+from tgutils.pages.paginator import VerticalPaginator, DEFAULT_MAX_ROWS
 from .feature import EnablerRouter
 from .register import CommandName as RegisterCommandNames
-from ...data.connectors.tables import MarkingResult, Table
-from ...data.helpers.defaults import get_default_course
 
 tasks_router = EnablerRouter('tasks', enabled_by_default=True)
 
 
-class CommandName(Enum):
-    DECLARE = 'declare'
-    RECALL = 'recall'
+class WeekPaginator(VerticalPaginator[str]):
+    def __init__(self):
+        VerticalPaginator.__init__(self, DEFAULT_MAX_ROWS - 1, 2)
+
+    class WeekCallback(CallbackData, prefix='tasks-week'):
+        week: str
+
+    def make_button(self, item: str) -> Button:
+        return Button(text=item, callback_data=self.WeekCallback(week=item).pack())
 
 
-class WeekCallback(CallbackData, prefix='week'):
-    week_name: str
+class TaskPaginator(VerticalPaginator[str]):
+    def __init__(self):
+        self.marked: set[str] = set()
+        VerticalPaginator.__init__(self, DEFAULT_MAX_ROWS - 1, 3)
+
+    class TaskCallback(CallbackData, prefix='tasks-tasks'):
+        task: str
+        mark: bool
+
+    def make_button(self, item: str) -> Button:
+        marked = item in self.marked
+        text = (OK_MINI if marked else FAIL_MINI) + item
+        return Button(text=text, callback_data=TaskPaginator.TaskCallback(task=item, mark=not marked).pack())
 
 
-class TaskCallback(CallbackData, prefix='task'):
-    task_name: str
+@dataclass
+class TasksContext(Context):
+    weeks: WeekPaginator = field(default_factory=WeekPaginator)
+    tasks: TaskPaginator = field(default_factory=TaskPaginator)
+
+    group_id: str = None
+    student_name: str = None
+    table: Table = None
+    selected_week: str = None
 
 
-class CommitCallback(CallbackData, prefix='commit'):
-    pass
+TasksContext.prepare(tasks_router)
 
 
 class TasksState(StatesGroup):
-    Command = State()
-    Week = State()
-    Task = State()
+    WEEK = State()
+    TASKS = State()
 
 
-def week_selector(weeks: list[str]) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    for week in weeks:
-        builder.button(text=week, callback_data=WeekCallback(week_name=week))
-    return builder.as_markup()
+@tasks_router.callback_query(WeekPaginator.callback().filter(), TasksState.WEEK)
+@TasksContext.inject
+async def handle_week_pagination(context: TasksContext, query: CallbackQuery):
+    context.weeks.advance(query)
+    await context.advance(TasksState.WEEK)
 
 
-def task_selector(
-    week_name: str, tasks: list[str], selection: set[str]
-) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    for task_name in tasks:
-        builder.button(
-            text=task_name
-            if task_name not in selection
-            else f'{task_name}{emoji.emojize(":green_circle:")}',
-            callback_data=TaskCallback(task_name=task_name),
-        )
-    rows = int(len(tasks) ** 0.5)
-    builder.row(
-        InlineKeyboardButton(text='Commit', callback_data=CommitCallback().pack())
-    )
-    item_count = [len(tasks) // rows for _ in range(rows)]
-    if (remainder := len(tasks) % rows) != 0:
-        item_count.append(remainder)
-    builder.adjust(*item_count)
-    return builder.as_markup()
+@tasks_router.callback_query(TaskPaginator.callback().filter(), TasksState.TASKS)
+@TasksContext.inject
+async def handle_task_pagination(context: TasksContext, query: CallbackQuery):
+    context.tasks.advance(query)
+    await context.advance(TasksState.TASKS)
 
 
-async def process_entry_point(
-    message: Message, state: FSMContext, command: CommandName
-):
+@tasks_router.entry_point(command='tasks')
+@TasksContext.entry_point
+async def handle_command(context: TasksContext, message: Message):
     tg_id = message.from_user.id
     if user := Users.get_user(tg_id):
-        group_id, student_name = user['group_id'], user['student_name']
-        await state.update_data({'group_id': group_id, 'student_name': student_name})
-    else:
-        await message.reply(
-            f'Please, first use /{RegisterCommandNames.REGISTER.value} to introduce yourself...'
-        )
+        context.group_id, context.student_name = user['group_id'], user['student_name']
+        context.table = Table.get_table(get_default_course(context.group_id), group_id=context.group_id)
+        await context.advance(TasksState.WEEK, sender=message.reply, cause=message)
         return
 
-    default_course = get_default_course(group_id)
-    table = Table.get_table(default_course, group_id=group_id)
-    await state.update_data(
-        {'message': message, 'tg_id': tg_id, 'table': table, 'action': command}
-    )
-    await state.set_state(TasksState.Week)
-    weeks = table.list_weeks()
-    await message.reply('Select a week', reply_markup=week_selector(weeks))
+    await message.reply(f'Please, first use /{RegisterCommandNames.REGISTER} to introduce yourself')
+    await context.finish()
 
 
-@tasks_router.entry_point(command=CommandName.DECLARE.value)
-async def declare_command_handler(message: Message, state: FSMContext):
-    await process_entry_point(message, state, CommandName.DECLARE)
+@TasksContext.register(TasksState.WEEK)
+def week_menu(context: TasksContext) -> Response:
+    if context.last_transition != ContextTransition.HOLD:
+        context.weeks.items = context.table.list_weeks()
 
-
-@tasks_router.entry_point(command=CommandName.RECALL.value)
-async def recall_command_handler(message: Message, state: FSMContext):
-    await process_entry_point(message, state, CommandName.RECALL)
-
-
-@tasks_router.callback_query(TasksState.Week, WeekCallback.filter())
-@tasks_router.callback_query(TasksState.Task, WeekCallback.filter())
-async def select_week_handler(query: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    group_id, student_name = data['group_id'], data['student_name']
-    original_message: Message = data['message']
-    table: Table = data['table']
-    action: CommandName = data['action']
-    week_name = WeekCallback.unpack(query.data).week_name
-
-    tasks = (
-        table.list_available_week_tasks(group_id, student_name, week_name)
-        if action is CommandName.DECLARE
-        else table.list_recallable_week_tasks(group_id, student_name, week_name)
-    )
-    if len(tasks) == 0:
-        await query.answer('Selected week has no tasks to offer :(')
-        return
-    await query.answer(f'Selected week {week_name}')
-    await state.set_state(TasksState.Task)
-
-    await state.update_data(
-        {'week_name': week_name, 'tasks': tasks, 'selection': set()}
-    )
-    if 'task_selector_message' in data:
-        await data['task_selector_message'].delete()
-    task_selector_message = await original_message.reply(
-        'Pick tasks to mark as solved and press \'Commit\'',
-        reply_markup=task_selector(week_name, tasks, set()),
-    )
-    await state.update_data({'task_selector_message': task_selector_message})
-
-
-@tasks_router.callback_query(TasksState.Task, TaskCallback.filter())
-async def check_task_handler(query: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    task_name = TaskCallback.unpack(query.data).task_name
-    week_name = data['week_name']
-    tasks: list[str] = data['tasks']
-    selection: set[str] = data['selection']
-
-    if task_name not in selection:
-        selection.add(task_name)
-    else:
-        selection.remove(task_name)
-
-    task_selector_message: Message = data['task_selector_message']
-    await state.update_data({'selection': selection})
-    await task_selector_message.edit_reply_markup(
-        reply_markup=task_selector(week_name, tasks, selection)
+    keyboard = KeyboardBuilder()
+    context.weeks.to_builder(keyboard)
+    keyboard.row(context.menu_button(context.Action.FINISH))
+    return Response(
+        text='Choose a week',
+        markup=keyboard.as_markup()
     )
 
 
-@tasks_router.callback_query(TasksState.Task, CommitCallback.filter())
-async def commit_handler(query: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    group_id, student_name, week_name = (
-        data['group_id'],
-        data['student_name'],
-        data['week_name'],
-    )
-    table: Table = data['table']
-    selection: set[str] = data['selection']
-    action: CommandName = data['action']
+@tasks_router.callback_query(TasksState.WEEK, WeekPaginator.WeekCallback.filter())
+@TasksContext.inject
+async def handle_week_select(context: TasksContext, query: CallbackQuery):
+    context.selected_week = WeekPaginator.WeekCallback.unpack(query.data).week
+    await context.advance(TasksState.TASKS)
 
-    task_list = [(week_name, task) for task in selection]
-    if action is CommandName.DECLARE:
-        result = table.mark_tasks(group_id, student_name, task_list)
-    else:
-        result = table.unmark_tasks(group_id, student_name, task_list)
 
-    original_message: Message = data['message']
-    if len(result[MarkingResult.NO_CHANGES]) > 0:
-        tasks_string = ', '.join(
-            sorted([task[1] for task in result[MarkingResult.NO_CHANGES]])
+class CommitCallback(CallbackData, prefix='tasks-commit'):
+    pass
+
+
+@TasksContext.register(TasksState.TASKS)
+def task_menu(context: TasksContext) -> Response:
+    if context.last_transition != ContextTransition.HOLD:
+        tasks = context.table.list_week_tasks(
+            context.group_id,
+            context.student_name,
+            context.selected_week
         )
-        await original_message.reply(f'Tasks {tasks_string} were skipped')
-    if len(result[MarkingResult.UNAVAILABLE]) > 0:
-        tasks_string = ', '.join(
-            sorted([task[1] for task in result[MarkingResult.UNAVAILABLE]])
-        )
-        await original_message.reply(f'You can not {action.value} tasks {tasks_string}')
+        context.tasks.items = []
+        context.tasks.marked = set()
+        for task, status in tasks:
+            context.tasks.items.append(task)
+            if status in (MarkStatus.MARKED, MarkStatus.MARKED_LOCKED):
+                context.tasks.marked.add(task)
 
-    task_selector_message: Message = data['task_selector_message']
-    await task_selector_message.delete()
+    keyboard = KeyboardBuilder()
+    context.tasks.to_builder(keyboard)
+    keyboard.row(
+        context.menu_button(context.Action.BACK),
+        Button(
+            text=f'{RECORD} Commit',
+            callback_data=CommitCallback().pack()
+        ),
+    )
+    return Response(
+        text='Change marking of tasks and press Commit',
+        markup=keyboard.as_markup()
+    )
+
+
+@tasks_router.callback_query(TasksState.TASKS, TaskPaginator.TaskCallback.filter())
+@TasksContext.inject
+async def handle_task_trigger(context: TasksContext, query: CallbackQuery):
+    data = TaskPaginator.TaskCallback.unpack(query.data)
+    task, mark = data.task, data.mark
+    if mark:
+        context.tasks.marked.add(task)
+    else:
+        context.tasks.marked.remove(task)
+    await context.advance(TasksState.TASKS)
+
+
+@tasks_router.callback_query(TasksState.TASKS, CommitCallback.filter())
+@TasksContext.inject
+async def handle_commit(context: TasksContext, query: CallbackQuery, bot: Bot):
+    task_list = [
+        (context.selected_week, task, task in context.tasks.marked)
+        for task in context.tasks.items
+    ]
+    result = context.table.update_tasks(context.group_id, context.student_name, task_list)
+
     await query.answer('Done!')
-    await state.clear()
+    if len(result[ChangeMarkingVerdict.UNAVAILABLE]) > 0:
+        skipped = [
+            f'+{task}' if task in context.tasks.marked else f'-{task}'
+            for _, task, _ in result[ChangeMarkingVerdict.UNAVAILABLE]
+        ]
+        tasks_string = ', '.join(sorted(skipped))
+        await bot.send_message(
+            context.chat_id,
+            f'Tasks {tasks_string} are locked, send this message to your teacher to update manually'
+        )
+
+    await context.finish()
