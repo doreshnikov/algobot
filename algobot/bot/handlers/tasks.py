@@ -83,6 +83,8 @@ async def handle_task_pagination(context: TasksContext, query: CallbackQuery):
 @tasks_router.entry_point(command='tasks')
 @TasksContext.entry_point
 async def handle_command(context: TasksContext, message: Message):
+    context.set_default(context.senders.EDIT)
+
     tg_id = message.from_user.id
     if user := Users.get_user(tg_id):
         context.group_id, context.student_name = user['group_id'], user['student_name']
@@ -90,7 +92,7 @@ async def handle_command(context: TasksContext, message: Message):
         await context.advance(TasksState.WEEK, sender=message.reply, cause=message)
         return
 
-    await message.reply(f'Please, first use /{RegisterCommandNames.REGISTER} to introduce yourself')
+    await message.reply(f'Please, first use /{RegisterCommandNames.REGISTER.value} to introduce yourself')
     await context.finish()
 
 

@@ -1,3 +1,4 @@
+import logging
 from typing import Callable, Any, Awaitable
 
 from aiogram import BaseMiddleware
@@ -16,4 +17,6 @@ class EnablerMiddleware(BaseMiddleware):
         is_enabled = get_flag(data, 'enabled')
         if is_feature and not is_enabled:
             return await event.reply('This feature is disabled')
+
+        logging.info(f'Passing event to {handler}')
         return await handler(event, data)

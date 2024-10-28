@@ -19,4 +19,4 @@ class TelegramUpdaterMiddleware(BaseMiddleware):
         tg_id, tg_username = user['id'], user['username']
         tg_name = full_name(user['first_name'], user['last_name'])
         Users.update_tg_data(tg_id, tg_username, tg_name)
-        await handler(event, data)
+        return await handler(event, data)

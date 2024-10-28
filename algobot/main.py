@@ -1,14 +1,11 @@
+from .logsetup import root_logger
+
 import asyncio
-import logging
-import sys
 
 import json5
 from aiogram import Bot
 
 from algobot.bot import dispatcher
-
-logging.basicConfig(level=logging.INFO, stream=sys.stdout)
-logger = logging.getLogger(__name__)
 
 
 async def main():
@@ -17,6 +14,7 @@ async def main():
     token = config['telegram']['token']
 
     bot = Bot(token)
+    root_logger.info('Starting up...')
     await dispatcher.start_polling(bot)
 
 
